@@ -34,28 +34,46 @@ const SUPABASE_URL = "https://phwhgmgoptszrtttjdft.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBod2hnbWdvcHRzenJ0dHRqZGZ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwMzI4MTMsImV4cCI6MjA4OTYwODgxM30.fUFfrFiijP1WUXcmmO80E3q2ZBoRsor2jDMmEzjkpuI";
 
 const sbFetch = async (path, opts = {}) => {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    ...opts,
-    headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json", "Prefer": opts.prefer || "return=representation", ...opts.headers },
-  });
-  if (!res.ok) return null;
-  const text = await res.text();
-  return text ? JSON.parse(text) : null;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+      ...opts,
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+        ...(opts.headers || {}),
+      },
+    });
+    const text = await res.text();
+    if (!res.ok) { console.error("Supabase error:", res.status, text); return null; }
+    return text ? JSON.parse(text) : [];
+  } catch (e) { console.error("Supabase fetch error:", e); return null; }
 };
 
 const dbLoadAll = async () => {
   const rows = await sbFetch("students?select=id,data");
-  if (!rows) return [];
+  if (!rows || !Array.isArray(rows)) return [];
   return rows.map(r => ({ ...r.data, id: r.id }));
 };
 
 const dbSaveStudent = async (s) => {
-  await sbFetch(`students?id=eq.${s.id}`, { method: "DELETE", prefer: "return=minimal" });
-  await sbFetch("students", { method: "POST", body: JSON.stringify({ id: s.id, data: s, updated_at: new Date().toISOString() }) });
+  // Use Supabase UPSERT (POST with on_conflict resolution)
+  const result = await sbFetch("students", {
+    method: "POST",
+    headers: {
+      "Prefer": "resolution=merge-duplicates,return=minimal",
+    },
+    body: JSON.stringify({ id: s.id, data: s, updated_at: new Date().toISOString() }),
+  });
+  if (result === null) console.error("Failed to save student:", s.id);
+  return result;
 };
 
 const dbDeleteStudent = async (id) => {
-  await sbFetch(`students?id=eq.${id}`, { method: "DELETE", prefer: "return=minimal" });
+  await sbFetch(`students?id=eq.${id}`, {
+    method: "DELETE",
+    headers: { "Prefer": "return=minimal" },
+  });
 };
 
 /* ═══════════ SHARED STYLES ═══════════ */
@@ -86,14 +104,28 @@ export default function App() {
   const [trainerPw, setTrainerPw] = useState("");
   const [trainerError, setTrainerError] = useState("");
   const [trainerLogin, setTrainerLogin] = useState(false);
-  const [fileUpload, setFileUpload] = useState({day:null,show:false});
   const [tab, setTab] = useState("roadmap");
+  const [dbStatus, setDbStatus] = useState("connecting"); // connecting, connected, error
 
   // Load from Supabase on mount
-  useEffect(() => { (async()=>{ const d = await dbLoadAll(); setStudents(d); setLoaded(true); })(); },[]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const d = await dbLoadAll();
+        if (d !== null) { setStudents(d); setDbStatus("connected"); }
+        else { setDbStatus("error"); }
+      } catch (e) { console.error("Load error:", e); setDbStatus("error"); }
+      setLoaded(true);
+    })();
+  }, []);
 
   // Sync helper — saves a single student to Supabase
-  const syncStudent = useCallback(async (s) => { setSaving(true); await dbSaveStudent(s); setSaving(false); }, []);
+  const syncStudent = useCallback(async (s) => {
+    setSaving(true);
+    const result = await dbSaveStudent(s);
+    setSaving(false);
+    if (result === null) setDbStatus("error"); else setDbStatus("connected");
+  }, []);
 
   const student = students.find(s=>s.id===activeId);
   const getStats = s => { const c=Object.values(s.dayProgress||{}).filter(d=>d.status==="completed").length; const ip=Object.values(s.dayProgress||{}).filter(d=>d.status==="in_progress").length; const dl=Object.values(s.dayProgress||{}).filter(d=>d.status==="delayed").length; const sc=Object.values(s.dayProgress||{}).filter(d=>d.score>0); const avg=sc.length?(sc.reduce((a,b)=>a+b.score,0)/sc.length).toFixed(1):"—"; return{completed:c,inProgress:ip,delayed:dl,pct:Math.round(c/90*100),avg}; };
@@ -192,7 +224,7 @@ export default function App() {
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet"/>
       <div style={{width:"100%",maxWidth:420,padding:"0 16px"}}>
         <div style={{textAlign:"center",marginBottom:36}}>
-          <div style={{fontFamily:"'Playfair Display',serif",fontSize:13,color:"#06B6D4",letterSpacing:4,marginBottom:8}}>DIGITECH PROS</div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:13,color:"#06B6D4",letterSpacing:4,marginBottom:8}}>STARTUP COACH</div>
           <h1 style={{margin:0,fontSize:28,fontWeight:800,background:"linear-gradient(135deg,#2563EB,#06B6D4)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>Learning Portal</h1>
           <p style={{color:"#64748B",fontSize:13,marginTop:6}}>90-Day GTM Engineer Program</p>
         </div>
@@ -249,12 +281,14 @@ export default function App() {
       <div style={css.mx}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:24}}>
           <div>
-            <div style={{fontFamily:"'Playfair Display',serif",fontSize:11,color:"#06B6D4",letterSpacing:3}}>DIGITECH PROS — TRAINER PANEL</div>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:11,color:"#06B6D4",letterSpacing:3}}>STARTUP COACH — TRAINER PANEL</div>
             <h1 style={{margin:"4px 0 0",fontSize:24,fontWeight:700}}>Student Dashboard</h1>
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            {dbStatus==="error" && <span style={{fontSize:11,color:"#EF4444",fontWeight:600}}>⚠ DB Error</span>}
             {saving && <span style={{fontSize:11,color:"#F59E0B",fontWeight:600}}>⟳ Saving...</span>}
-            {loaded && !saving && <span style={{fontSize:11,color:"#10B981"}}>● Synced</span>}
+            {!saving && dbStatus==="connected" && <span style={{fontSize:11,color:"#10B981"}}>● Synced</span>}
+            {dbStatus==="connecting" && <span style={{fontSize:11,color:"#94A3B8"}}>○ Connecting...</span>}
             <button onClick={()=>{setForm(mkStudent());setEditMode(true);setView("profile");}} style={css.btn("linear-gradient(135deg,#2563EB,#06B6D4)","#fff")}>+ New Student</button>
             <button onClick={()=>{setRole(null);setActiveId(null);}} style={css.btn("#1E293B","#94A3B8","1px solid #334155")}>Logout</button>
           </div>
@@ -312,7 +346,7 @@ export default function App() {
             {isTrainer && <button onClick={()=>{setView("list");setEditMode(false);}} style={css.btn(isDark?"#1E293B":"#E2E8F0",isDark?"#94A3B8":"#475569",`1px solid ${isDark?"#334155":"#CBD5E1"}`)}>← Students</button>}
             {!isTrainer && <button onClick={()=>{setRole(null);setActiveId(null);}} style={css.btn("#E2E8F0","#475569","1px solid #CBD5E1")}>← Logout</button>}
           </div>
-          <div style={{fontFamily:"'Playfair Display',serif",fontSize:10,color:"#06B6D4",letterSpacing:3}}>{isTrainer?"TRAINER PANEL":"STUDENT PORTAL"}</div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:10,color:"#06B6D4",letterSpacing:3}}>{isTrainer?"STARTUP COACH — TRAINER PANEL":"STARTUP COACH — STUDENT PORTAL"}</div>
         </div>
 
         {/* Edit Form (Trainer Only) */}
