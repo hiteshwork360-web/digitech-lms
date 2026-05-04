@@ -105,6 +105,9 @@ export default function App() {
   const [trainerError, setTrainerError] = useState("");
   const [trainerLogin, setTrainerLogin] = useState(false);
   const [tab, setTab] = useState("roadmap");
+  const [ciLearning, setCiLearning] = useState("");
+  const [ciMood, setCiMood] = useState("");
+  const [ciStatus, setCiStatus] = useState("");
   const [dbStatus, setDbStatus] = useState("connecting"); // connecting, connected, error
 
   // Load from Supabase on mount
@@ -420,17 +423,201 @@ export default function App() {
             </div>
 
             {/* Tab Switcher */}
-            <div style={{display:"flex",gap:4,marginBottom:14}}>
-              {["roadmap","files","history"].map(t=>(
+            <div style={{display:"flex",gap:4,marginBottom:14,flexWrap:"wrap"}}>
+              {["checkin","roadmap","files","history"].map(t=>(
                 <button key={t} onClick={()=>setTab(t)}
                   style={{padding:"8px 16px",borderRadius:6,fontSize:12,fontWeight:tab===t?700:400,cursor:"pointer",
                     background:tab===t?(isDark?"#2563EB22":"#DBEAFE"):isDark?"#111827":"#F1F5F9",
                     color:tab===t?"#2563EB":isDark?"#64748B":"#94A3B8",
                     border:`1px solid ${tab===t?"#2563EB33":isDark?"#1E293B":"#E2E8F0"}`}}>
-                  {t==="roadmap"?"📋 Roadmap":t==="files"?"📁 Files & Exams":"📜 History"}
+                  {t==="checkin"?"✅ Daily Check-In":t==="roadmap"?"📋 Roadmap":t==="files"?"📁 Files & Exams":"📜 History"}
                 </button>
               ))}
             </div>
+
+            {/* ═══ TAB: DAILY CHECK-IN ═══ */}
+            {tab==="checkin"&&(()=>{
+              const today = new Date().toISOString().split("T")[0];
+              const checkins = student.checkIns || [];
+              const todayLog = checkins.find(c=>c.date===today);
+              const streak = (()=>{
+                let s=0; const d=new Date();
+                while(true){
+                  const ds=d.toISOString().split("T")[0];
+                  if(checkins.find(c=>c.date===ds&&c.status==="complete")){s++; d.setDate(d.getDate()-1);}
+                  else break;
+                } return s;
+              })();
+
+              const submitCheckin = (status, learning, mood) => {
+                setStudents(p=>{
+                  const updated=p.map(s=>{
+                    if(s.id!==activeId) return s;
+                    const logs=[...(s.checkIns||[]).filter(c=>c.date!==today),
+                      {date:today,status,learning,mood,time:new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}),submittedAt:new Date().toISOString()}];
+                    return{...s,checkIns:logs};
+                  });
+                  const s=updated.find(s=>s.id===activeId); if(s) syncStudent(s);
+                  return updated;
+                });
+              };
+
+              const [ciLearning2, setCiLearning2] = [ciLearning, setCiLearning];
+              const [ciMood2, setCiMood2] = [ciMood, setCiMood];
+              const [ciStatus2, setCiStatus2] = [ciStatus, setCiStatus];
+
+              // Find today's day number based on schedule
+              const todayDayNum = (()=>{
+                if(!student.startDate) return null;
+                const diff = Math.floor((new Date(today)-new Date(student.startDate))/86400000)+(student.totalPausedDays||0);
+                return Math.min(Math.max(diff+1,1),90);
+              })();
+              const todayDayInfo = PLAN.flatMap(w=>w.d).find(d=>d.n===todayDayNum);
+
+              const [ciLearning2, setCiLearning2] = [ciLearning, setCiLearning];
+              const [ciMood2, setCiMood2] = [ciMood, setCiMood];
+              const [ciStatus2, setCiStatus2] = [ciStatus, setCiStatus];
+
+              return(
+                <div>
+                  {/* Student Check-In Card */}
+                  {!isTrainer&&(
+                    <div style={{...css.card(false),border:"1px solid #BFDBFE",background:"#EFF6FF",marginBottom:12}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
+                        <div>
+                          <div style={{fontSize:18,fontWeight:800,color:"#1E40AF"}}>Today's Check-In</div>
+                          <div style={{fontSize:12,color:"#64748B",marginTop:2}}>{new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long"})}</div>
+                          {todayDayInfo&&<div style={{fontSize:11,color:"#2563EB",marginTop:3,fontWeight:600}}>Day {todayDayNum}: {todayDayInfo.t}</div>}
+                        </div>
+                        {streak>0&&<div style={{textAlign:"center",background:"#FEF3C7",border:"1px solid #FCD34D",borderRadius:8,padding:"8px 14px"}}>
+                          <div style={{fontSize:22,fontWeight:800,color:"#D97706"}}>{streak}</div>
+                          <div style={{fontSize:9,color:"#92400E",fontWeight:600}}>DAY STREAK 🔥</div>
+                        </div>}
+                      </div>
+
+                      {todayLog?.status==="complete"?(
+                        <div style={{background:"#D1FAE5",border:"1px solid #6EE7B7",borderRadius:8,padding:14}}>
+                          <div style={{fontSize:13,fontWeight:700,color:"#065F46",marginBottom:6}}>✅ Checked in today!</div>
+                          <div style={{fontSize:11,color:"#047857"}}>Mood: {todayLog.mood}  •  Submitted at {todayLog.time}</div>
+                          {todayLog.learning&&<div style={{fontSize:12,color:"#1E293B",marginTop:8,fontStyle:"italic"}}>"{todayLog.learning}"</div>}
+                        </div>
+                      ):(
+                        <div style={{display:"grid",gap:12}}>
+                          <div>
+                            <div style={{fontSize:12,fontWeight:700,color:"#1E293B",marginBottom:8}}>Where are you with today's lesson?</div>
+                            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                              {[{v:"studying",l:"📖 Currently Studying",c:"#2563EB"},{v:"complete",l:"✅ Completed Today",c:"#10B981"},{v:"behind",l:"⏱ Running Behind",c:"#F59E0B"}].map(opt=>(
+                                <button key={opt.v} onClick={()=>setCiStatus2(opt.v)}
+                                  style={{padding:"8px 14px",borderRadius:6,fontSize:12,fontWeight:ciStatus2===opt.v?700:400,cursor:"pointer",
+                                    background:ciStatus2===opt.v?opt.c+"22":"#F8FAFC",color:ciStatus2===opt.v?opt.c:"#64748B",
+                                    border:`2px solid ${ciStatus2===opt.v?opt.c:"#E2E8F0"}`}}>{opt.l}</button>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{fontSize:12,fontWeight:700,color:"#1E293B",marginBottom:8}}>How are you feeling about the material?</div>
+                            <div style={{display:"flex",gap:10}}>
+                              {[{v:"💪",l:"Confident"},{v:"😐",l:"Okay"},{v:"😕",l:"Struggling"}].map(m=>(
+                                <button key={m.v} onClick={()=>setCiMood2(m.v+" "+m.l)}
+                                  style={{padding:"10px 16px",borderRadius:8,fontSize:13,cursor:"pointer",textAlign:"center",
+                                    background:ciMood2===m.v+" "+m.l?"#DBEAFE":"#F8FAFC",
+                                    border:`2px solid ${ciMood2===m.v+" "+m.l?"#2563EB":"#E2E8F0"}`}}>
+                                  <div style={{fontSize:22}}>{m.v}</div>
+                                  <div style={{fontSize:9,color:"#64748B",marginTop:2}}>{m.l}</div>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{fontSize:12,fontWeight:700,color:"#1E293B",marginBottom:6}}>What did you learn today? <span style={{fontWeight:400,color:"#94A3B8"}}>(2-3 lines)</span></div>
+                            <textarea value={ciLearning2} onChange={e=>setCiLearning2(e.target.value)} rows={3}
+                              placeholder="Write what stuck with you today — a concept, a framework, an example..."
+                              style={{width:"100%",padding:"10px 12px",border:"1px solid #CBD5E1",borderRadius:6,fontSize:12,outline:"none",resize:"vertical",boxSizing:"border-box",background:"#fff",color:"#1E293B"}}/>
+                          </div>
+                          <button onClick={()=>{if(ciStatus2&&ciMood2){submitCheckin(ciStatus2,ciLearning2,ciMood2);}}}
+                            disabled={!ciStatus2||!ciMood2}
+                            style={{padding:"12px",background:ciStatus2&&ciMood2?"linear-gradient(135deg,#2563EB,#06B6D4)":"#E2E8F0",color:ciStatus2&&ciMood2?"#fff":"#94A3B8",border:"none",borderRadius:8,fontSize:14,fontWeight:700,cursor:ciStatus2&&ciMood2?"pointer":"not-allowed"}}>
+                            Submit Today's Check-In
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Trainer: See all check-ins */}
+                  {isTrainer&&(
+                    <div style={css.card(isDark)}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                        <h3 style={{margin:0,fontSize:15,fontWeight:700}}>✅ Daily Check-In Log</h3>
+                        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                          <span style={{fontSize:11,color:"#F59E0B",fontWeight:600}}>🔥 {streak} day streak</span>
+                          <span style={{fontSize:11,color:"#94A3B8"}}>{checkins.length} total entries</span>
+                        </div>
+                      </div>
+
+                      {/* Alert if no check-in for 2+ days */}
+                      {(()=>{
+                        const last = checkins.sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
+                        const daysSince = last ? Math.floor((new Date()-new Date(last.date))/86400000) : 999;
+                        if(daysSince>=2) return(
+                          <div style={{padding:"10px 14px",background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:8,marginBottom:12,fontSize:12,color:"#DC2626",fontWeight:600}}>
+                            ⚠️ No check-in for {daysSince} days — consider reaching out to {student.name}
+                          </div>
+                        );
+                        return null;
+                      })()}
+
+                      {checkins.length===0?(
+                        <p style={{color:"#94A3B8",fontSize:12,textAlign:"center",padding:20}}>No check-ins yet.</p>
+                      ):(
+                        <div>
+                          {[...checkins].sort((a,b)=>new Date(b.date)-new Date(a.date)).map((ci,i)=>(
+                            <div key={i} style={{padding:"12px 0",borderTop:i?`1px solid ${isDark?"#1E293B":"#E2E8F0"}`:"none"}}>
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                                <div style={{flex:1}}>
+                                  <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4}}>
+                                    <span style={{fontSize:12,fontWeight:700}}>{new Date(ci.date).toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short"})}</span>
+                                    <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:600,
+                                      background:ci.status==="complete"?"#D1FAE5":ci.status==="studying"?"#DBEAFE":"#FEF3C7",
+                                      color:ci.status==="complete"?"#065F46":ci.status==="studying"?"#1E40AF":"#92400E"}}>
+                                      {ci.status==="complete"?"✅ Completed":ci.status==="studying"?"📖 Studying":"⏱ Behind"}
+                                    </span>
+                                    <span style={{fontSize:13}}>{ci.mood?.split(" ")[0]}</span>
+                                    <span style={{fontSize:10,color:"#94A3B8"}}>{ci.time}</span>
+                                  </div>
+                                  {ci.learning&&<div style={{fontSize:11,color:isDark?"#94A3B8":"#475569",fontStyle:"italic",marginTop:2}}>"{ci.learning}"</div>}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Student: Past check-ins */}
+                  {!isTrainer&&checkins.length>0&&(
+                    <div style={css.card(false)}>
+                      <h3 style={{margin:"0 0 12px",fontSize:14,fontWeight:700,color:"#1E293B"}}>Your Check-In History</h3>
+                      {[...checkins].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,7).map((ci,i)=>(
+                        <div key={i} style={{display:"flex",gap:10,alignItems:"center",padding:"8px 0",borderTop:i?`1px solid #E2E8F0`:"none"}}>
+                          <span style={{fontSize:18}}>{ci.mood?.split(" ")[0]||"📝"}</span>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:12,fontWeight:600,color:"#1E293B"}}>{new Date(ci.date).toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short"})}</div>
+                            {ci.learning&&<div style={{fontSize:11,color:"#64748B",fontStyle:"italic"}}>"{ci.learning}"</div>}
+                          </div>
+                          <span style={{padding:"2px 8px",borderRadius:20,fontSize:9,fontWeight:700,
+                            background:ci.status==="complete"?"#D1FAE5":ci.status==="studying"?"#DBEAFE":"#FEF3C7",
+                            color:ci.status==="complete"?"#065F46":ci.status==="studying"?"#1E40AF":"#92400E"}}>
+                            {ci.status==="complete"?"✅ Done":ci.status==="studying"?"📖 Studied":"⏱ Behind"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* ═══ TAB: ROADMAP ═══ */}
             {tab==="roadmap"&&(
