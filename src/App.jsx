@@ -473,10 +473,7 @@ export default function App() {
                 return Math.min(Math.max(diff+1,1),90);
               })();
               const todayDayInfo = PLAN.flatMap(w=>w.d).find(d=>d.n===todayDayNum);
-
-              const [ciLearning2, setCiLearning2] = [ciLearning, setCiLearning];
-              const [ciMood2, setCiMood2] = [ciMood, setCiMood];
-              const [ciStatus2, setCiStatus2] = [ciStatus, setCiStatus];
+              
 
               return(
                 <div>
